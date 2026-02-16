@@ -294,7 +294,7 @@ class HeartbeatConsumer:
 def main():
     """Main execution function"""
     # Kafka Configuration
-    KAFKA_BROKER = 'localhost:9092'
+    KAFKA_BROKERS = ['localhost:9092', 'localhost:9094', 'localhost:9096']  # Multiple brokers
     KAFKA_TOPIC = 'heartbeat-data'
     CONSUMER_GROUP = 'heartbeat-consumer-group'
     
@@ -321,8 +321,9 @@ def main():
     
     # Initialize consumer
     try:
+        logger.info(f"Connecting to Kafka brokers: {', '.join(KAFKA_BROKERS)}")
         consumer = HeartbeatConsumer(
-            bootstrap_servers=KAFKA_BROKER,
+            bootstrap_servers=KAFKA_BROKERS,
             topic=KAFKA_TOPIC,
             group_id=CONSUMER_GROUP,
             db_manager=db_manager

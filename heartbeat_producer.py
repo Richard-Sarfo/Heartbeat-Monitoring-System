@@ -120,7 +120,7 @@ def main():
     # Configuration
     NUM_CUSTOMERS = 10
     SEND_INTERVAL = 2  # seconds between batches
-    KAFKA_BROKER = 'localhost:9092'
+    KAFKA_BROKERS = ['localhost:9092', 'localhost:9094', 'localhost:9096']  # Multiple brokers
     KAFKA_TOPIC = 'heartbeat-data'
     
     logger.info("=" * 60)
@@ -130,9 +130,10 @@ def main():
     
     # Initialize generator and producer
     generator = HeartbeatDataGenerator(num_customers=NUM_CUSTOMERS)
-    producer = HeartbeatProducer(bootstrap_servers=KAFKA_BROKER, topic=KAFKA_TOPIC)
+    producer = HeartbeatProducer(bootstrap_servers=KAFKA_BROKERS, topic=KAFKA_TOPIC)
     
     logger.info(f"Generating data for {NUM_CUSTOMERS} customers")
+    logger.info(f"Connected to Kafka brokers: {', '.join(KAFKA_BROKERS)}")
     logger.info(f"Sending to Kafka topic: {KAFKA_TOPIC}")
     logger.info(f"Data interval: {SEND_INTERVAL} seconds")
     logger.info("Press Ctrl+C to stop\n")

@@ -1,8 +1,9 @@
 version: '3.8'
 
 services:
-  
-# Zookeeper - Required for Kafka coordination
+  # ============================================================
+  # Zookeeper - Required for Kafka coordination
+  # ============================================================
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: heartbeat-zookeeper
@@ -17,10 +18,12 @@ services:
       - zookeeper-data:/var/lib/zookeeper/data
       - zookeeper-logs:/var/lib/zookeeper/log
 
-  # Kafka - Message broker for streaming data
-  kafka:
+  # ============================================================
+  # Kafka Brokers - Multiple brokers for fault tolerance
+  # ============================================================
+  kafka1:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: heartbeat-kafka
+    container_name: heartbeat-kafka1
     depends_on:
       - zookeeper
     ports:
@@ -29,25 +32,91 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka1:9093
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_DELETE_TOPIC_ENABLE: "true"
     networks:
       - heartbeat-network
     volumes:
-      - kafka-data:/var/lib/kafka/data
+      - kafka1-data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 30s
       timeout: 10s
       retries: 5
 
+  kafka2:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: heartbeat-kafka2
+    depends_on:
+      - zookeeper
+    ports:
+      - "9094:9094"
+      - "9095:9095"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9094,PLAINTEXT_INTERNAL://kafka2:9095
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+    networks:
+      - heartbeat-network
+    volumes:
+      - kafka2-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9094"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kafka3:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: heartbeat-kafka3
+    depends_on:
+      - zookeeper
+    ports:
+      - "9096:9096"
+      - "9097:9097"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9096,PLAINTEXT_INTERNAL://kafka3:9097
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+    networks:
+      - heartbeat-network
+    volumes:
+      - kafka3-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9096"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ============================================================
   # PostgreSQL - Database for storing heartbeat data
+  # ============================================================
   postgres:
     image: postgres:15-alpine
     container_name: heartbeat-postgres
@@ -69,8 +138,9 @@ services:
       timeout: 5s
       retries: 5
 
-   # pgAdmin - Web interface for PostgreSQL
-
+  # ============================================================
+  # pgAdmin - Web interface for PostgreSQL (Optional)
+  # ============================================================
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: heartbeat-pgadmin
@@ -85,35 +155,45 @@ services:
     depends_on:
       - postgres
 
-  # Kafka UI - Web interface for Kafka monitoring
-
+  # ============================================================
+  # Kafka UI - Web interface for Kafka monitoring (Optional)
+  # ============================================================
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: heartbeat-kafka-ui
     depends_on:
-      - kafka
+      - kafka1
+      - kafka2
+      - kafka3
     ports:
       - "8080:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: heartbeat-cluster
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9093
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:9093,kafka2:9095,kafka3:9097
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
     networks:
       - heartbeat-network
 
+# ============================================================
 # Networks
+# ============================================================
 networks:
   heartbeat-network:
     driver: bridge
 
-
+# ============================================================
 # Volumes for data persistence
+# ============================================================
 volumes:
   zookeeper-data:
     driver: local
   zookeeper-logs:
     driver: local
-  kafka-data:
+  kafka1-data:
+    driver: local
+  kafka2-data:
+    driver: local
+  kafka3-data:
     driver: local
   postgres-data:
     driver: local
