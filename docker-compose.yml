@@ -169,6 +169,29 @@ services:
     networks:
       - heartbeat-network
 
+  # Grafana - Visualization & Monitoring Dashboard
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: heartbeat-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_SERVER_ROOT_URL: http://localhost:3000
+    ports:
+      - "3000:3000"
+    networks:
+      - heartbeat-network
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Dashboard - Streamlit application
 
   dashboard:
@@ -256,4 +279,6 @@ volumes:
   kafka3-data:
     driver: local
   postgres-data:
+    driver: local
+  grafana-data:
     driver: local

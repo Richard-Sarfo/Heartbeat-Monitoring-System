@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: PostgreSQL Heartbeat DB
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: heartbeat_db
+    user: postgres
+    password: postgres
+    isDefault: true
+    editable: true
+    jsonData:
+      sslmode: "disable"
+      postgresVersion: 1500
