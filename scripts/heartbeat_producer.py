@@ -8,6 +8,7 @@ and streams it to a Kafka topic in real-time.
 import json
 import random
 import time
+import os
 from datetime import datetime
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
@@ -117,11 +118,14 @@ class HeartbeatProducer:
 
 def main():
     """Main execution function"""
-    # Configuration
-    NUM_CUSTOMERS = 10
-    SEND_INTERVAL = 2  # seconds between batches
-    KAFKA_BROKERS = ['localhost:9092', 'localhost:9094', 'localhost:9096']  # Multiple brokers
-    KAFKA_TOPIC = 'heartbeat-data'
+    # Configuration with environment variable fallbacks
+    NUM_CUSTOMERS = int(os.getenv('NUM_CUSTOMERS', 10))
+    SEND_INTERVAL = int(os.getenv('SEND_INTERVAL', 2))
+    
+    # Parse Kafka brokers from environment or use defaults
+    kafka_servers_env = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092,localhost:9094,localhost:9096')
+    KAFKA_BROKERS = kafka_servers_env.split(',') if isinstance(kafka_servers_env, str) else list(kafka_servers_env)
+    KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'heartbeat-data')
     
     logger.info("=" * 60)
     logger.info("Real-Time Customer Heartbeat Monitoring System")

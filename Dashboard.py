@@ -22,12 +22,15 @@ st.set_page_config(
 )
 
 # Database configuration
+import os
+
+# Database configuration
 DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'database': 'heartbeat_db',
-    'user': 'postgres',
-    'password': 'postgres'
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': int(os.getenv('DB_PORT', 5432)),
+    'database': os.getenv('DB_NAME', 'heartbeat_db'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', 'postgres')
 }
 
 

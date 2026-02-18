@@ -7,6 +7,7 @@ detects anomalies, and stores it in PostgreSQL database.
 
 import json
 import logging
+import os
 from datetime import datetime
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
@@ -293,18 +294,19 @@ class HeartbeatConsumer:
 
 def main():
     """Main execution function"""
-    # Kafka Configuration
-    KAFKA_BROKERS = ['localhost:9092', 'localhost:9094', 'localhost:9096']  # Multiple brokers
-    KAFKA_TOPIC = 'heartbeat-data'
-    CONSUMER_GROUP = 'heartbeat-consumer-group'
+    # Kafka Configuration from environment variables
+    kafka_servers_env = os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092,localhost:9094,localhost:9096')
+    KAFKA_BROKERS = kafka_servers_env.split(',') if isinstance(kafka_servers_env, str) else list(kafka_servers_env)
+    KAFKA_TOPIC = os.getenv('KAFKA_TOPIC', 'heartbeat-data')
+    CONSUMER_GROUP = os.getenv('KAFKA_GROUP_ID', 'heartbeat-consumer-group')
     
-    # Database Configuration
+    # Database Configuration from environment variables
     DB_CONFIG = {
-        'host': 'localhost',
-        'port': 5432,
-        'database': 'heartbeat_db',
-        'user': 'postgres',
-        'password': 'postgres'
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'port': int(os.getenv('DB_PORT', 5432)),
+        'database': os.getenv('DB_NAME', 'heartbeat_db'),
+        'user': os.getenv('DB_USER', 'postgres'),
+        'password': os.getenv('DB_PASSWORD', 'postgres')
     }
     
     logger.info("=" * 60)

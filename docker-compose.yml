@@ -1,7 +1,5 @@
 services:
-  # ============================================================
   # Zookeeper - Required for Kafka coordination
-  # ============================================================
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     container_name: heartbeat-zookeeper
@@ -16,9 +14,8 @@ services:
       - zookeeper-data:/var/lib/zookeeper/data
       - zookeeper-logs:/var/lib/zookeeper/log
 
-  # ============================================================
+
   # Kafka Brokers - Multiple brokers for fault tolerance
-  # ============================================================
   kafka1:
     image: confluentinc/cp-kafka:7.5.0
     container_name: heartbeat-kafka1
@@ -112,9 +109,9 @@ services:
       timeout: 10s
       retries: 5
 
-  # ============================================================
+
   # PostgreSQL - Database for storing heartbeat data
-  # ============================================================
+  
   postgres:
     image: postgres:15-alpine
     container_name: heartbeat-postgres
@@ -136,9 +133,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ============================================================
   # pgAdmin - Web interface for PostgreSQL (Optional)
-  # ============================================================
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: heartbeat-pgadmin
@@ -153,16 +148,18 @@ services:
     depends_on:
       - postgres
 
-  # ============================================================
-  # Kafka UI - Web interface for Kafka monitoring (Optional)
-  # ============================================================
+  
+  # Kafka UI - Web interface for Kafka monitoring
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: heartbeat-kafka-ui
     depends_on:
-      - kafka1
-      - kafka2
-      - kafka3
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
@@ -172,16 +169,81 @@ services:
     networks:
       - heartbeat-network
 
-# ============================================================
+  # Dashboard - Streamlit application
+
+  dashboard:
+    build: .
+    container_name: heartbeat-dashboard
+    command: streamlit run Dashboard.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=heartbeat_db
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - heartbeat-network
+
+  # Heartbeat Producer - Generates synthetic data and publishes to Kafka
+  producer:
+    build: .
+    container_name: heartbeat-producer
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka1:9093,kafka2:9095,kafka3:9097
+      KAFKA_TOPIC: heartbeat-data
+    networks:
+      - heartbeat-network
+    command: python scripts/heartbeat_producer.py
+    restart: on-failure
+
+  # Heartbeat Consumer - Consumes data and stores in PostgreSQL
+  
+  consumer:
+    build: .
+    container_name: heartbeat-consumer
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka1:9093,kafka2:9095,kafka3:9097
+      KAFKA_TOPIC: heartbeat-data
+      KAFKA_GROUP_ID: heartbeat-consumer
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: heartbeat_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    networks:
+      - heartbeat-network
+    command: python scripts/heartbeat_consumer.py
+    restart: on-failure
+
 # Networks
-# ============================================================
 networks:
   heartbeat-network:
     driver: bridge
 
-# ============================================================
 # Volumes for data persistence
-# ============================================================
 volumes:
   zookeeper-data:
     driver: local

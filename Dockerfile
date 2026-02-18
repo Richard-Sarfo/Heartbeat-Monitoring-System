@@ -30,6 +30,9 @@ RUN pip install --upgrade pip && \
 # Copy application scripts
 COPY scripts/ ./scripts/
 COPY sql/ ./sql/
+COPY Dashboard.py .
+
+EXPOSE 8501
 
 # Create a non-root user
 RUN useradd -m -u 1000 appuser && \
