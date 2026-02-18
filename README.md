@@ -7,30 +7,38 @@ This is a **real-time data engineering system** that simulates and processes cus
 ### Architecture
 
 ```
-┌─────────────────────┐
-│  Data Generator     │ (Synthetic user data)
-└──────────┬──────────┘
-           │
-           ↓
-┌─────────────────────┐
-│  Kafka Producer     │ (Publish to kafka)
-└──────────┬──────────┘
-           │
-        Topic: heartbeat-data
-           │
-┌──────────▼──────────┐
-│  Kafka Consumer     │ (Subscribe & Validate)
-└──────────┬──────────┘
-           │
-         ↓ (Validate & analyse)
-┌─────────────────────┐
-│  PostgreSQL DB      │ (Store processed data)
-└─────────────────────┘
-           │
-           ↓
-┌─────────────────────┐
-│  Streamlit Dashboard│ (Visualize data)
-└─────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Synthetic Data Generator                                    │
+│  (scripts/heartbeat_producer.py)                             │
+└────────────────────────┬─────────────────────────────────────┘
+                         │
+                         ↓
+                 ┌─────────────────┐
+                 │  Kafka Broker   │
+                 │  (3 replicas)   │
+                 └────────┬────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          │               │               │
+          ↓               ↓               ↓
+   ┌────────────┐  ┌─────────────┐  ┌─────────────┐
+   │  Consumer  │  │  Consumer   │  │  Consumer   │
+   │  (Python)  │  │  (Validate) │  │  (Metrics)  │
+   └──────┬─────┘  └─────────────┘  └─────────────┘
+          │
+          ↓
+   ┌─────────────────────┐
+   │  PostgreSQL DB      │
+   │  heartbeat_records  │
+   └──────┬──────────────┘
+          │
+   ┌──────┴──────┐
+   │             │
+   ↓             ↓
+┌──────────┐  ┌──────────────┐
+│ Streamlit│  │  Grafana     │
+│Dashboard │  │  Dashboards  │
+└──────────┘  └──────────────┘
 ```
 
 ---
@@ -89,6 +97,22 @@ By completing this project, you will understand:
 - Customer statistics and anomaly alerts
 - Historical trend analysis
 - Interactive filters and controls
+- Accessible at http://localhost:8501
+
+### 6. **Grafana Monitoring** (`grafana/dashboards/`)
+- Advanced visualization and alerting platform
+- Pre-built dashboard with 7 key panels:
+  - Average Heart Rate (last hour)
+  - Total Records Ingested
+  - Critical Anomalies Count
+  - Unique Customers
+  - Heart Rate Trend (24h)
+  - Anomaly Distribution
+  - Recent Critical Alerts Table
+- Auto-provision PostgreSQL datasource
+- Customizable alerts and notifications
+- Accessible at http://localhost:3000
+- See [GRAFANA_SETUP.md](GRAFANA_SETUP.md) for detailed guide
 
 ---
 
@@ -112,15 +136,17 @@ pip install -r requirements.txt
 ### Step 2: Start Docker Services
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
 This automatically starts all services:
 - ✅ Zookeeper (port 2181)
-- ✅ Kafka Brokers (3 replicas on ports 9092-9097)
+- ✅ Kafka Brokers × 3 (ports 9092-9097)
 - ✅ PostgreSQL (port 5432)
+- ✅ Grafana (port 3000) - *New!*
 - ✅ pgAdmin (port 5050)
 - ✅ Kafka UI (port 8080)
+- ✅ Streamlit Dashboard (port 8501)
 - ✅ Producer service (auto-generating data)
 - ✅ Consumer service (processing and storing data)
 
@@ -148,16 +174,24 @@ docker compose exec postgres psql -U postgres -d heartbeat_db -c "SELECT COUNT(*
 ```
 
 **Access Kafka UI:**
-Open http://localhost:8080 in your browser to monitor message flow
+- Open http://localhost:8080 in your browser to monitor message flow
 
-### Step 4: View Dashboard
+### Step 4: Access Dashboards
 
-**Run Streamlit locally (in a new terminal):**
-```bash
-streamlit run Dashboard.py
+**Grafana (Advanced Monitoring):**
 ```
+URL: http://localhost:3000
+Username: admin
+Password: admin
+```
+Pre-built dashboard with heart rate trends, anomaly detection, and critical alerts.
+See [GRAFANA_SETUP.md](GRAFANA_SETUP.md) for detailed queries and customization.
 
-Opens at: http://localhost:8501
+**Streamlit Dashboard:**
+```
+URL: http://localhost:8501
+```
+Interactive Python-based UI built into the docker-compose.
 
 ---
 
@@ -270,12 +304,22 @@ Heartbeat/
 │   └── heartbeat_consumer.py      # Consumer + validation + DB insert
 ├── sql/
 │   └── schema.sql                 # PostgreSQL schema
+├── grafana/
+│   ├── provisioning/
+│   │   ├── datasources/
+│   │   │   └── postgres.yml       # Auto-provision PostgreSQL datasource
+│   │   └── dashboards/
+│   │       └── dashboards.yml     # Dashboard provisioning config
+│   └── dashboards/
+│       └── heartbeat-dashboard.json  # Pre-built Grafana dashboard
 ├── Dashboard.py                   # Streamlit visualization
 ├── docker-compose.yml             # Docker services definition
 ├── Dockerfile                     # Container image for Python apps
 ├── requirements.txt               # Python dependencies
 ├── test_system.py                 # Testing script
-└── README.md                      # This file
+├── GRAFANA_SETUP.md              # Grafana configuration guide
+├── README.md                      # This file
+└── Screenshots/                   # Sample output images
 ```
 
 ---
@@ -361,12 +405,17 @@ For production deployment:
 
 ## 📚 Documentation Files
 
-- **docker-compose.yml** → Infrastructure as Code
+- **README.md** → This file (project overview)
+- **GRAFANA_SETUP.md** → Detailed Grafana configuration and queries
+- **QUICKSTART.md** → Quick setup guide
+- **docker-compose.yml** → Infrastructure as Code (9 services)
 - **Dockerfile** → Container specifications
-- **schema.sql** → Database design
+- **schema.sql** → PostgreSQL database design
 - **scripts/heartbeat_producer.py** → Data generation logic
-- **scripts/heartbeat_consumer.py** → Real-time processing
-- **Dashboard.py** → Visualization logic
+- **scripts/heartbeat_consumer.py** → Real-time processing and validation
+- **Dashboard.py** → Streamlit visualization
+- **grafana/provisioning/** → Auto-provisioning configs
+- **grafana/dashboards/heartbeat-dashboard.json** → Pre-built Grafana dashboard
 
 ---
 
@@ -390,26 +439,30 @@ For production deployment:
 
 - ✅ Python scripts (producer & consumer)
 - ✅ SQL schema file with indexes
-- ✅ Docker Compose file with multiple services
+- ✅ Docker Compose file with 9+ services
 - ✅ README with setup instructions
 - ✅ Streamlit dashboard
+- ✅ **Grafana with PostgreSQL datasource** (NEW)
+- ✅ Grafana pre-built dashboard with 7 panels (NEW)
 - ✅ Configuration for fault tolerance (3 Kafka brokers)
 - ✅ Data validation & anomaly detection
 - ✅ Database views for analysis
-- ⏳ Architecture diagram (see above)
-- ⏳ Sample screenshot outputs
+- ✅ Architecture diagram (see above)
+- ✅ Comprehensive Grafana setup guide (GRAFANA_SETUP.md)
+- ✅ Sample screenshot outputs
 
 ---
 
 ## 🚀 Next Steps (Optional Extensions)
 
-1. **Add real sensor integration** → Replace synthetic data with actual IoT sensors
-2. **Machine learning anomaly detection** → Isolation Forest or LSTM models
-3. **Alert system** → Email/SMS notifications for critical anomalies
-4. **Grafana integration** → Advanced dashboarding with PostgreSQL data source
-5. **Multi-region deployment** → Kafka cluster federation
-6. **Data archival** → Move old data to cheaper storage (S3/MinIO)
-7. **Complete compliance tracking** → HIPAA-compliant audit logs
+1. **Grafana Alerts** → Email/Slack/PagerDuty notifications for critical thresholds
+2. **Add real sensor integration** → Replace synthetic data with actual IoT sensors
+3. **Machine learning anomaly detection** → Isolation Forest or LSTM models in consumer
+4. **Multi-region deployment** → Kafka cluster federation for global coverage
+5. **Data archival** → Move old data to cheaper storage (S3/MinIO)
+6. **Complete compliance tracking** → HIPAA-compliant audit logs
+7. **Advanced Grafana features** → Custom variables, alert rules, user provisioning
+8. **Metrics export** → Prometheus/OpenTelemetry integration
 
 ---
 
