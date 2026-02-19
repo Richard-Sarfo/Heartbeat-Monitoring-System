@@ -3,18 +3,25 @@ Real-Time Customer Heartbeat Kafka Consumer
 
 This script consumes heartbeat data from Kafka, validates it,
 detects anomalies, and stores it in PostgreSQL database.
+
+Features:
+- Event time-based processing with watermarking
+- Late data detection and handling
+- Window-based anomaly detection
 """
 
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import execute_values
 import sys
+from collections import defaultdict
+from heapq import heappush, heappop
 
 # Configure logging
 logging.basicConfig(
@@ -72,6 +79,100 @@ class HeartbeatValidator:
             return 'elevated', 'Elevated (Exercise/Stress)'
         else:
             return 'normal', 'Normal'
+
+
+class WatermarkTracker:
+    """Tracks event-time watermarks for handling late and out-of-order data."""
+
+    def __init__(self, allowed_lateness_seconds=30):
+        self.allowed_lateness = timedelta(seconds=allowed_lateness_seconds)
+        self.current_watermark = None  # No watermark until first message
+        self.late_count = 0
+        self.on_time_count = 0
+
+    def update(self, event_time):
+        """Advance the watermark if event_time is the new maximum."""
+        if self.current_watermark is None or event_time > self.current_watermark:
+            self.current_watermark = event_time
+
+    def is_late(self, event_time):
+        """Check whether an event is late relative to the watermark."""
+
+        if self.current_watermark is None:
+            return 'on_time'
+
+        lag = self.current_watermark - event_time
+
+        if lag <= timedelta(0):
+            return 'on_time'
+        elif lag <= self.allowed_lateness:
+            self.late_count += 1
+            return 'late'
+        else:
+            self.late_count += 1
+            return 'dropped'
+
+    def get_stats(self):
+        return {
+            'watermark': self.current_watermark.isoformat() if self.current_watermark else None,
+            'on_time': self.on_time_count,
+            'late': self.late_count,
+        }
+
+
+class WindowAggregator:
+    """Tumbling-window aggregator for per-customer heart rate statistics.
+"""
+
+    def __init__(self, window_size_seconds=300):
+        self.window_size = timedelta(seconds=window_size_seconds)
+        # {customer_id: {window_start: [heart_rates]}}
+        self.windows = defaultdict(lambda: defaultdict(list))
+
+    def _window_start(self, event_time):
+        """Compute the start of the tumbling window for a given event time."""
+        epoch = datetime(2000, 1, 1)
+        elapsed = (event_time - epoch).total_seconds()
+        window_num = int(elapsed // self.window_size.total_seconds())
+        return epoch + timedelta(seconds=window_num * self.window_size.total_seconds())
+
+    def add(self, customer_id, event_time, heart_rate):
+        """Add a reading to the appropriate window."""
+        ws = self._window_start(event_time)
+        self.windows[customer_id][ws].append(heart_rate)
+
+    def evaluate_and_close(self, current_watermark):
+        """Close and evaluate windows that are fully past the watermark."""
+        if current_watermark is None:
+            return []
+
+        alerts = []
+        cutoff = self._window_start(current_watermark)  # current open window
+
+        for customer_id in list(self.windows.keys()):
+            for ws in list(self.windows[customer_id].keys()):
+                # Only close windows that ended before the current window
+                if ws + self.window_size <= cutoff:
+                    readings = self.windows[customer_id].pop(ws)
+                    if not readings:
+                        continue
+                    avg_hr = sum(readings) / len(readings)
+                    anomaly_level, desc = HeartbeatValidator.detect_anomaly(int(avg_hr))
+                    if anomaly_level not in ('normal', 'elevated'):
+                        alerts.append({
+                            'customer_id': customer_id,
+                            'window_start': ws.isoformat(),
+                            'window_end': (ws + self.window_size).isoformat(),
+                            'avg_heart_rate': round(avg_hr, 1),
+                            'reading_count': len(readings),
+                            'anomaly_level': anomaly_level,
+                            'description': f"Window alert: {desc}",
+                        })
+            # Clean up empty customer entries
+            if not self.windows[customer_id]:
+                del self.windows[customer_id]
+
+        return alerts
 
 
 class DatabaseManager:
@@ -204,14 +305,20 @@ class DatabaseManager:
 
 
 class HeartbeatConsumer:
-    """Kafka consumer for heartbeat data"""
+    """Kafka consumer for heartbeat data with watermarking support."""
     
-    def __init__(self, bootstrap_servers, topic, group_id, db_manager):
+    def __init__(self, bootstrap_servers, topic, group_id, db_manager,
+                 allowed_lateness_seconds=30, window_size_seconds=300):
         self.topic = topic
         self.db_manager = db_manager
         self.consumer = None
         self.bootstrap_servers = bootstrap_servers
         self.group_id = group_id
+
+        # Watermark & windowing
+        self.watermark = WatermarkTracker(allowed_lateness_seconds)
+        self.window_agg = WindowAggregator(window_size_seconds)
+
         self._connect()
     
     def _connect(self):
@@ -232,13 +339,17 @@ class HeartbeatConsumer:
             raise
     
     def consume(self, batch_size=10):
-        """Consume messages from Kafka and process them"""
-        logger.info("Starting to consume messages...")
+        """Consume messages from Kafka with event-time watermarking."""
+        logger.info("Starting to consume messages (watermark-enabled)...")
+        logger.info(f"Allowed lateness: {self.watermark.allowed_lateness.total_seconds()}s")
+        logger.info(f"Window size:      {self.window_agg.window_size.total_seconds()}s")
         logger.info("Press Ctrl+C to stop\n")
         
         message_count = 0
         valid_count = 0
         invalid_count = 0
+        late_accepted_count = 0
+        dropped_count = 0
         batch = []
         
         try:
@@ -246,29 +357,78 @@ class HeartbeatConsumer:
                 heartbeat_data = message.value
                 message_count += 1
                 
-                # Validate data
-                if HeartbeatValidator.validate(heartbeat_data):
-                    valid_count += 1
-                    batch.append(heartbeat_data)
-                    
-                    # Log individual message
-                    logger.debug(
-                        f"Received: {heartbeat_data['customer_id']} - "
-                        f"{heartbeat_data['heart_rate']} bpm at {heartbeat_data['timestamp']}"
-                    )
-                    
-                    # Insert batch when size reached
-                    if len(batch) >= batch_size:
-                        self.db_manager.insert_batch(batch)
-                        batch = []
-                else:
+                #  Validate schema
+                if not HeartbeatValidator.validate(heartbeat_data):
                     invalid_count += 1
+                    continue
+                # Parse event time & advance watermark
+                try:
+                    event_time = datetime.fromisoformat(heartbeat_data['timestamp'])
+                except (ValueError, TypeError):
+                    logger.warning(f"Unparseable timestamp: {heartbeat_data['timestamp']}")
+                    invalid_count += 1
+                    continue
+
+                self.watermark.update(event_time)
+
+                # Late-data check 
+                lateness = self.watermark.is_late(event_time)
+
+                if lateness == 'dropped':
+                    dropped_count += 1
+                    logger.debug(
+                        f"DROPPED (late beyond threshold): "
+                        f"{heartbeat_data['customer_id']} at {heartbeat_data['timestamp']}"
+                    )
+                    continue  # Do NOT insert into DB
+
+                if lateness == 'late':
+                    late_accepted_count += 1
+                    logger.info(
+                        f"LATE (accepted): {heartbeat_data['customer_id']} "
+                        f"at {heartbeat_data['timestamp']} "
+                        f"(watermark: {self.watermark.current_watermark.isoformat()})"
+                    )
+
+                # Feed into window aggregator 
+                valid_count += 1
+                self.window_agg.add(
+                    heartbeat_data['customer_id'],
+                    event_time,
+                    heartbeat_data['heart_rate']
+                )
+                batch.append(heartbeat_data)
+                
+                logger.debug(
+                    f"Received [{lateness}]: {heartbeat_data['customer_id']} - "
+                    f"{heartbeat_data['heart_rate']} bpm at {heartbeat_data['timestamp']}"
+                )
+                
+                #  Batch insert
+                if len(batch) >= batch_size:
+                    self.db_manager.insert_batch(batch)
+                    batch = []
+
+                    # Evaluate closed windows
+                    alerts = self.window_agg.evaluate_and_close(
+                        self.watermark.current_watermark
+                    )
+                    for alert in alerts:
+                        logger.warning(
+                            f"WINDOW ALERT: {alert['customer_id']} | "
+                            f"{alert['window_start']} -> {alert['window_end']} | "
+                            f"Avg HR: {alert['avg_heart_rate']} bpm | "
+                            f"{alert['description']}"
+                        )
                 
                 # Periodic status update
                 if message_count % 50 == 0:
+                    wm_stats = self.watermark.get_stats()
                     logger.info(
                         f"Processed: {message_count} | Valid: {valid_count} | "
-                        f"Invalid: {invalid_count}"
+                        f"Invalid: {invalid_count} | Late(accepted): {late_accepted_count} | "
+                        f"Dropped: {dropped_count} | "
+                        f"Watermark: {wm_stats['watermark']}"
                     )
         
         except KeyboardInterrupt:
@@ -279,8 +439,11 @@ class HeartbeatConsumer:
                 self.db_manager.insert_batch(batch)
             
             logger.info(f"Total messages processed: {message_count}")
-            logger.info(f"Valid messages: {valid_count}")
+            logger.info(f"Valid (on-time):  {valid_count - late_accepted_count}")
+            logger.info(f"Valid (late):     {late_accepted_count}")
+            logger.info(f"Dropped (too late): {dropped_count}")
             logger.info(f"Invalid messages: {invalid_count}")
+            logger.info(f"Final watermark:  {self.watermark.current_watermark}")
         
         finally:
             self.close()
