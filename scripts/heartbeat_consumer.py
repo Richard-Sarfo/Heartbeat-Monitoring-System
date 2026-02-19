@@ -121,8 +121,7 @@ class WatermarkTracker:
 
 
 class WindowAggregator:
-    """Tumbling-window aggregator for per-customer heart rate statistics.
-"""
+    """Tumbling-window aggregator for per-customer heart rate statistics."""
 
     def __init__(self, window_size_seconds=300):
         self.window_size = timedelta(seconds=window_size_seconds)

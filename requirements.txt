@@ -1,22 +1,14 @@
-# ============================================================
-# Real-Time Customer Heartbeat Monitoring System
 # Python Dependencies
-# ============================================================
 
-# Kafka Client
-kafka-python==2.0.2
+# Core Pipeline (Producer & Consumer)
+kafka-python==2.0.2          # Kafka client for producer/consumer
+psycopg2-binary==2.9.9       # PostgreSQL driver
 
-# PostgreSQL Driver
-psycopg2-binary==2.9.9
-
-# Optional: For alternative Kafka library
-# confluent-kafka==2.3.0
-
-# Data Processing (if needed for extensions)
+# Data Processing 
 pandas==2.1.4
 numpy==1.26.2
 
-# Visualization (Optional - for dashboard)
+# Dashboard (Streamlit)
 streamlit==1.29.0
 plotly==5.18.0
 matplotlib==3.8.2
